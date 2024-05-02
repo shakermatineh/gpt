@@ -91,9 +91,12 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, num_heads, head_size):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        self.proj = nn.Linear(n_embd, n_embd)
 
     def forward(self, x):
-        return torch.cat([h(x) for h in self.heads], dim=-1)
+        out = torch.cat([h(x) for h in self.heads], dim=-1)
+        out = self.proj(out) # projection is linear transformation of concatanated heads
+        return out
 
 
 class FeedFoward(nn.Module):
@@ -103,7 +106,8 @@ class FeedFoward(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, n_embd),
-            nn.ReLU()
+            nn.ReLU(),
+            nn.Linear(n_embd, n_embd) # projection layer
         )
 
     def forward(self, x):
@@ -120,9 +124,19 @@ class Block(nn.Module):
         self.sa = MultiHeadAttention(n_head, head_size)
         self.ffwd = FeedFoward(n_embd)
 
+    """
+    residual pathways/skip connections:
+    addition distributes gradient equally to both branches. 
+    The supervision (gradient of the loss) hop from addition node to input. 
+    Gradient super highway goes from direcctly to the input.
+    The residual blocks initialized in a way to contribute very little to the pathway.
+    The blocks come online over time but initially gradient is directly goes from loss to input.
+    That dramatically improves optimization of deep networks.
+    """
+
     def forward(self, x):
-        x = self.sa(x)
-        x = self.ffwd(x)
+        x = x + self.sa(x) 
+        x = x + self.ffwd(x) 
         return x
 
 
