@@ -105,9 +105,9 @@ class FeedFoward(nn.Module):
     def __init__(self, n_embd):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(n_embd, n_embd),
+            nn.Linear(n_embd, 4 * n_embd), # inner layer of FF in paper in 4 times n_embd (2048 for n_embd=512)
             nn.ReLU(),
-            nn.Linear(n_embd, n_embd) # projection layer
+            nn.Linear(4 * n_embd, n_embd) # projection layer
         )
 
     def forward(self, x):
@@ -123,6 +123,8 @@ class Block(nn.Module):
         head_size = n_embd // n_head
         self.sa = MultiHeadAttention(n_head, head_size)
         self.ffwd = FeedFoward(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
 
     """
     residual pathways/skip connections:
@@ -134,14 +136,28 @@ class Block(nn.Module):
     That dramatically improves optimization of deep networks.
     """
 
+
+    """
+    Batch norm: 
+    across batch dim, every neuron activationhas unit gaussian distribution. 
+    normalize matrix by column, means normalize across batch for a single feature.
+    
+    Layor norm: 
+    normalize matrix by rows, means normalize across features in a single sample.
+    # slight deviation from original paper. No Add & Norm after MHSA. Layer norm applied before MHSA called Pre-Norm. 
+
+
+    """
+
     def forward(self, x):
-        x = x + self.sa(x) 
-        x = x + self.ffwd(x) 
+        x = x + self.sa(self.ln1(x)) # pre-norm: layer norm, then sa, then skip connection add 
+        x = x + self.ffwd(self.ln2(x)) # pre-norm: layer norm, then ffwd, then skip connection add 
         return x
 
 
 class GPTLanguageModel(nn.Module):
 
+ 
     def __init__(self):
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
@@ -150,7 +166,8 @@ class GPTLanguageModel(nn.Module):
         self.blocks = nn.Sequential(
             Block(n_embd, n_head=4),
             Block(n_embd, n_head=4),
-            Block(n_embd, n_head=4)
+            Block(n_embd, n_head=4),
+            nn.LayerNorm(n_embd), # layernorm at the end of final transformer, before final linear layer that decodes into vocab. 
         )
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
