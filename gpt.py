@@ -13,7 +13,7 @@ eval_iters = 200
 n_embd = 32
 n_head = 4
 n_layer = 3
-dropout = 0.2
+dropout = 0.0
 # ------------
 
 """
@@ -24,6 +24,7 @@ learning_rate = 1e-3
 n_embd = 384
 n_head = 6
 n_layer = 6
+dropout = 0.2
 
 """
 
@@ -146,7 +147,7 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(n_embd)
 
     """
-    residual pathways/skip connections:
+    Residual pathways/skip connections:
     addition distributes gradient equally to both branches. 
     The supervision (gradient of the loss) hop from addition node to input. 
     Gradient super highway goes from direcctly to the input.
@@ -154,7 +155,6 @@ class Block(nn.Module):
     The blocks come online over time but initially gradient is directly goes from loss to input.
     That dramatically improves optimization of deep networks.
     """
-
 
     """
     Batch norm: 
