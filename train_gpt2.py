@@ -221,8 +221,9 @@ with open('input.txt', 'r') as f:
 data = text[:1000] # first 1,000 characters
 enc = tiktoken.get_encoding("gpt2")
 tokens = enc.encode(data)
-B, T = 4, 32
+B, T = 4, 32 # create a batch to overfit on it first.
 buf = torch.tensor(tokens[:24 + 1]) # to have target for the very last token in batch
+buf = buf.to(device)
 x = buf[:-1].view(4, 6)
 y = buf[1:].view(4, 6)
 
@@ -231,6 +232,14 @@ model.to(device)
 logits, loss = model(x, y)
 print(loss) # initial loss on random model is ~11.18 which almost matches -ln(1/50257) = 10.8
 print(logits.shape)
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+for i in range(50):
+    optimizer.zero_grad() # .backward adds to gradient (+=), so we must set to zero at the begining
+    logits, loss = model(x, y)
+    loss.backward()
+    optimizer.step()
+    print(f"step: {i} loss: {loss.item()}")
 
 
 import sys; sys.exit(0)
