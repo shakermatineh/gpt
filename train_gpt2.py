@@ -138,6 +138,8 @@ class GPT(nn.Module):
         B, T = idx.size()
         assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is only {self.config.block_size}"
         # forward the token and posisition embeddings
+        # Careful to create pos on the right device. When calling forward:
+        # model.to(device) and logits = model(x), no mismatch of one tensor on cpu other gpu.
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device) # shape (T)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (T, n_embd)
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (B, T, n_embd)
@@ -205,15 +207,26 @@ class GPT(nn.Module):
         return model
     
 #----------------------------------------------------------------------
+# attempt to autodetect device
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+# there's a bug for mps case
+# elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+#     device = "mps" # backend for apple silicon 
+print(f"using device: {device}")
+
 # generate tokens from the model
 # identical to generator("Hello, I'm a language model,", max_length=30, num_return_sequences=5) in notebook
 num_return_sequences = 5
 max_length = 30
 
 model = GPT.from_pretrained('gpt2')
+#model = GPT(GPTConfig()) #random model
 print("didn't crash yay!")
 model.eval() # when just using the model, not training. models have different behaviors like Dropbox.
-#model.to('cuda')
+model.to(device)
+# what pytroch does for us internally when we do model.to(device)?
 
 # prefix tokens
 import tiktoken
@@ -221,11 +234,11 @@ enc = tiktoken.get_encoding("gpt2")
 tokens = enc.encode("Hello, I'm a language model,")
 tokens = torch.tensor(tokens, dtype=torch.long) # (8,) 8 tokens
 tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1) # (5, 8)
-x = tokens#.to('cuda')
+x = tokens.to(device)
 
 # generate! right now x is (B, T) where B = 5, T = 8
 torch.manual_seed(42)
-##torch.cuda.manual_seed(42)
+torch.cuda.manual_seed(42)
 while x.size(1) < max_length:
     # forward the model to get the logits
     #with torch.no_grad:
