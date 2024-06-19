@@ -133,7 +133,7 @@ class GPT(nn.Module):
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False) # uses no bias for final projection.
 
-    def forward(self, idx):#, targets=None):
+    def forward(self, idx, targets=None):
         # idx is of shape (B, T)
         B, T = idx.size()
         assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is only {self.config.block_size}"
@@ -150,11 +150,10 @@ class GPT(nn.Module):
         # forward the final layernorm and the classifier
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x) # (B, T, vocab_size)
-        # loss = None
-        # if targets is not None:
-        #     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-        return logits#, loss
-    
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
     
     
     @classmethod
@@ -216,6 +215,27 @@ if torch.cuda.is_available():
 #     device = "mps" # backend for apple silicon 
 print(f"using device: {device}")
 
+import tiktoken
+with open('input.txt', 'r') as f:
+    text = f.read()
+data = text[:1000] # first 1,000 characters
+enc = tiktoken.get_encoding("gpt2")
+tokens = enc.encode(data)
+B, T = 4, 32
+buf = torch.tensor(tokens[:24 + 1]) # to have target for the very last token in batch
+x = buf[:-1].view(4, 6)
+y = buf[1:].view(4, 6)
+
+model = GPT(GPTConfig()) #random model
+model.to(device)
+logits, loss = model(x, y)
+print(loss) # initial loss on random model is ~11.18 which almost matches -ln(1/50257) = 10.8
+print(logits.shape)
+
+
+import sys; sys.exit(0)
+
+
 # generate tokens from the model
 # identical to generator("Hello, I'm a language model,", max_length=30, num_return_sequences=5) in notebook
 num_return_sequences = 5
@@ -224,7 +244,7 @@ max_length = 30
 model = GPT.from_pretrained('gpt2')
 #model = GPT(GPTConfig()) #random model
 print("didn't crash yay!")
-model.eval() # when just using the model, not training. models have different behaviors like Dropbox.
+model.eval() # when just using the model, not training. models have different behaviors like Dropout.
 model.to(device)
 # what pytroch does for us internally when we do model.to(device)?
 
