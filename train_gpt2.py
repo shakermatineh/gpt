@@ -216,31 +216,63 @@ if torch.cuda.is_available():
 print(f"using device: {device}")
 
 import tiktoken
-with open('input.txt', 'r') as f:
-    text = f.read()
-data = text[:1000] # first 1,000 characters
-enc = tiktoken.get_encoding("gpt2")
-tokens = enc.encode(data)
-B, T = 4, 32 # create a batch to overfit on it first.
-buf = torch.tensor(tokens[:24 + 1]) # to have target for the very last token in batch
-buf = buf.to(device)
-x = buf[:-1].view(4, 6)
-y = buf[1:].view(4, 6)
+# with open('input.txt', 'r') as f:
+#     text = f.read()
+# data = text[:1000] # first 1,000 characters
+# enc = tiktoken.get_encoding("gpt2")
+# tokens = enc.encode(data)
+# B, T = 4, 32 # create a batch to overfit on it first.
+# buf = torch.tensor(tokens[:24 + 1]) # to have target for the very last token in batch
+# buf = buf.to(device)
+# x = buf[:-1].view(4, 6)
+# y = buf[1:].view(4, 6)
 
-model = GPT(GPTConfig()) #random model
+class DataLoaderLite:
+    # create a simple dataloader to keep reading B*T batches from file to train on.
+    def __init__(self, B, T):
+        self.B = B
+        self.T = T
+
+        # at init load tokens from disk and store in memory
+        with open('input.txt', 'r') as f:
+            text = f.read()
+        enc = tiktoken.get_encoding('gpt2')
+        tokens = enc.encode(text)
+        self.tokens = torch.tensor(tokens)
+        print(f"loaded {len(self.tokens)} tokens")
+        print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
+
+        # state
+        self.current_position = 0
+
+    def next_batch(self):
+        B, T = self.B, self.T
+        buf = self.tokens[self.current_position : self.current_position+B*T+1]
+        x = buf[:-1].view(B, T)
+        y = buf[1:].view(B, T)
+        self.current_position += B * T
+        if self.current_position + (B * T + 1) > len(self.tokens):
+            self.current_position = 0
+        return x, y
+
+train_loader = DataLoaderLite(B=4, T=32)
+model = GPT(GPTConfig())
 model.to(device)
-logits, loss = model(x, y)
-print(loss) # initial loss on random model is ~11.18 which almost matches -ln(1/50257) = 10.8
-print(logits.shape)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
-for i in range(50):
+for i in range(50): 
+    x, y = train_loader.next_batch()
+    x, y = x.to(device), y.to(device)
     optimizer.zero_grad() # .backward adds to gradient (+=), so we must set to zero at the begining
-    logits, loss = model(x, y)
+    logits, loss = model(x, y) # init loss ~ -ln(1/50257) = 10.8
     loss.backward()
     optimizer.step()
     print(f"step: {i} loss: {loss.item()}")
 
+# at every batch we feed new data, so not overfitting on a single batch
+# loss comes down to about 6.57. most of the gain is from canceling tokens that never occur
+# pushing their bias to large negative number that makes the softmax probability to almost 0.
+# each epoch is 2640 batches, we're only doing 50, so not expecting a lot of gain here.
 
 import sys; sys.exit(0)
 
