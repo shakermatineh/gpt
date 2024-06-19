@@ -133,6 +133,12 @@ class GPT(nn.Module):
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False) # uses no bias for final projection.
 
+        # weight sharing scheme. 
+        # taking wte.weight and redirect it to point to lm_head 
+        # copies data pointer, reference, wte.weight becomes orphan and python cleans it up.
+        # 768 * 50257 = 40 million parameters, 30% of total params saving.
+        self.transformer.wte.weight = self.lm_head.weight
+
     def forward(self, idx, targets=None):
         # idx is of shape (B, T)
         B, T = idx.size()
@@ -269,8 +275,8 @@ for i in range(50):
     optimizer.step()
     print(f"step: {i} loss: {loss.item()}")
 
-# at every batch we feed new data, so not overfitting on a single batch
-# loss comes down to about 6.57. most of the gain is from canceling tokens that never occur
+# at every batch we feed new data, so not overfitting on a single batch.
+# most of the gain is from canceling tokens that never occur
 # pushing their bias to large negative number that makes the softmax probability to almost 0.
 # each epoch is 2640 batches, we're only doing 50, so not expecting a lot of gain here.
 
