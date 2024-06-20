@@ -288,6 +288,13 @@ train_loader = DataLoaderLite(B=16, T=1024) # actual gpt2 context length is 1024
 # if above doesn't fit into gpu and we get oom, keep decreasing batch size until fits.
 # by default we want to max out batch size, use numbers that have many powers of two's.
 
+torch.set_float32_matmul_precision('high')
+# tells pytorch what kernels to run. By default it's highest (float32)
+# high runs tf32. matmult with run on Tensor Cores.
+# Available on A100, on older gpus might not be avaible.
+# Based on specs it should increase throughput by 8x.
+# in practice in this code we see 3x because we are memory-bound.
+
 # get logits
 model = GPT(GPTConfig())
 model.to(device)
@@ -318,6 +325,9 @@ for i in range(50):
 
 # baseline with 1 A100 GPU with 40GB memory with FP32 tensors:
 # time per iter: 770ms, tokens_per_sec throughput: 21000
+
+# after changing from fp32 to tf32:
+# time per iter: 237ms, tokens_per_sec throughput: 68000
 
 import sys; sys.exit(0)
 
