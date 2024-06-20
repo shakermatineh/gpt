@@ -1,0 +1,26 @@
+By default in pytorch when creating tensors (activations, parameters) everything is in float32.
+This is too much in deep learning training. Nvidia A100 supports even FP64 but we don't need for DL. 
+Based on A100 specs for FP32 we expect 19.5 tera flops which mean 19.5 trillion FP operations per second as theoretical peak performance.
+
+If we go lower precision to TF32 we get 8x gain and if we go even lower to FP16 Tensor Core and BFLOAT16 we get 16x gain.
+INT8 Tensor Core offers 32x gain, but that is used for inference not training. It has uniform spacing, but we want FP matches better match to normal disto of weights and activations during training NNs.
+
+If numbers have fewer bits it's easier to move them arround. This is where we talk about memory bandwidth.
+We have finite capacity on number of bits GPU can store, but there's a speed to access that memory. We have certain memory bandwidth which is precious resource.
+
+Most of DL workloads for training are memory bound. The tensor cores doing fast muliplication most of the time are idle, we can't feed them with data fast enough. We can load fast enough from memory.
+If we get 60% utilization we're doing very well, means half of time data is not available to tensorcores.
+
+
+Tensor Core
+It is an instruction in A100, does 4-by-4 matrix mult.
+TF32 has exact 8 bits for exponent of floating point, but it mantissa bits get cropped in TF32, instead of 23 bits of FP32.
+TF32 accumlator (intermediate +=) happens in FP32.
+All of these are internal to instruction, in pytroch level all numbers look identical. 
+When we call TC instruction internally in hardward crops out 13 bits of mantissa. That makes the 4-by-4 matrix mult 8x faster, and a bit more approximate.
+
+As CPU runs, it schedules work on GPU. Sends request and continues running. If we measure time using time.time() CPU does that work.
+It could happen that GPU is still working and CPU measures time it took to run some code inaccurately.
+We need to do torch.cuda.synchronise() and that waits for the GPU to finish all the scheduled runs, and then we can take the time.
+
+If we run train_gpt2.py in baseline FP32 with an A100 GPU, we see 1000 ms per iteration.

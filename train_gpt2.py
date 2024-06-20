@@ -270,6 +270,8 @@ class DataLoaderLite:
         return x, y
 
 #----------------------------------------------------------------------
+import time
+
 # attempt to autodetect device
 device = "cpu"
 if torch.cuda.is_available():
@@ -283,21 +285,27 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
-train_loader = DataLoaderLite(B=4, T=32)
+train_loader = DataLoaderLite(B=4, T=32) # actual gpt2 context length is 1024 tokens
 
 # get logits
 model = GPT(GPTConfig())
 model.to(device)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
-for i in range(50): 
+for i in range(50):
+    t0 = time.time()
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
     optimizer.zero_grad() # .backward adds to gradient (+=), so we must set to zero at the begining
     logits, loss = model(x, y) # init loss ~ -ln(1/50257) = 10.8
+    # import code; code.interact(local=locals())
     loss.backward()
     optimizer.step()
-    print(f"step: {i} loss: {loss.item()}")
+    if torch.cuda.is_available(): 
+        torch.cuda.synchronize() # wait for all scheduled gpu jobs to finish.
+    t1 = time.time()
+    dt = (t1 - t0) * 1000 # time diff in miliseconds
+    print(f"step: {i} loss: {loss.item()}, dt: {dt:.2f}ms")
 
 # at every batch we feed new data, so not overfitting on a single batch.
 # each epoch is 2640 batches, we're only doing 50, so not expecting a lot of gain here.
