@@ -300,9 +300,10 @@ for i in range(50):
     print(f"step: {i} loss: {loss.item()}")
 
 # at every batch we feed new data, so not overfitting on a single batch.
+# each epoch is 2640 batches, we're only doing 50, so not expecting a lot of gain here.
 # most of the gain is from canceling tokens that never occur
 # pushing their bias to large negative number that makes the softmax probability to almost 0.
-# each epoch is 2640 batches, we're only doing 50, so not expecting a lot of gain here.
+# with this code the loss comes down to 6.84
 
 import sys; sys.exit(0)
 
