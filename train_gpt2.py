@@ -7,8 +7,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-
-
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
@@ -272,6 +270,7 @@ class DataLoaderLite:
 #----------------------------------------------------------------------
 import time
 
+
 # attempt to autodetect device
 device = "cpu"
 if torch.cuda.is_available():
@@ -285,12 +284,15 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
-train_loader = DataLoaderLite(B=4, T=32) # actual gpt2 context length is 1024 tokens
+train_loader = DataLoaderLite(B=16, T=1024) # actual gpt2 context length is 1024 tokens
+# if above doesn't fit into gpu and we get oom, keep decreasing batch size until fits.
+# by default we want to max out batch size, use numbers that have many powers of two's.
 
 # get logits
 model = GPT(GPTConfig())
 model.to(device)
 
+# watch -n 0.1 nvidia-smi
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 for i in range(50):
     t0 = time.time()
@@ -305,13 +307,17 @@ for i in range(50):
         torch.cuda.synchronize() # wait for all scheduled gpu jobs to finish.
     t1 = time.time()
     dt = (t1 - t0) * 1000 # time diff in miliseconds
-    print(f"step: {i} loss: {loss.item()}, dt: {dt:.2f}ms")
+    tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
+    print(f"step: {i} loss: {loss.item()}, dt: {dt:.2f}ms, tok/sec: {tokens_per_sec:.2f}")
 
 # at every batch we feed new data, so not overfitting on a single batch.
 # each epoch is 2640 batches, we're only doing 50, so not expecting a lot of gain here.
 # most of the gain is from canceling tokens that never occur
 # pushing their bias to large negative number that makes the softmax probability to almost 0.
 # with this code the loss comes down to 6.84
+
+# baseline with 1 A100 GPU with 40GB memory with FP32 tensors:
+# time per iter: 770ms, tokens_per_sec throughput: 21000
 
 import sys; sys.exit(0)
 
