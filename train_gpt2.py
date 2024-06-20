@@ -18,6 +18,8 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
+
         # regularization
         self.n_head = config.n_head
         self.n_embd = config.n_embd
@@ -79,6 +81,7 @@ class MLP(nn.Module):
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu    = nn.GELU(approximate='tanh')
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
 
     def forward(self, x):
         # two linear projections, gelu in between
@@ -138,6 +141,30 @@ class GPT(nn.Module):
         # copies data pointer, reference, wte.weight becomes orphan and python cleans it up.
         # 768 * 50257 = 40 million parameters, 30% of total params saving.
         self.transformer.wte.weight = self.lm_head.weight
+
+        # init params
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        # https://github.com/openai/gpt-2/blob/master/src/model.py#L147
+        # in above code te initialized with std=0.02, and pe with std=0.01
+        # we just use 0.02 for all embeddings
+        if isinstance(module, nn.Linear):
+            std = 0.02
+            if hasattr(module, 'NANOGPT_SCALE_INIT'):
+                # scale the weights of residual layers at initialization 
+                # by a factor of 1/sqrt(N) based on GPT2 paper section 2.3
+                std *= (2 * self.config.n_layer) ** -0.5 # in every block two times residuals added, in mlp and self attention 
+            
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            # std with Xavier init is 1/sqrt(num features in incoming layer)
+            # either 768 or 1024 num features 1/sqrt(768) 0r 1/sqrt(1024) ~ 0.03
+            # similar to 0.02 range. 
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias) # by default bias init with uniform
+            
+            elif isinstance(module, nn.Embedding):
+                torch.nn.init.normal(module.weight, mean=0.0, std=0.02)
 
     def forward(self, idx, targets=None):
         # idx is of shape (B, T)
@@ -211,27 +238,8 @@ class GPT(nn.Module):
 
         return model
     
-#----------------------------------------------------------------------
-# attempt to autodetect device
-device = "cpu"
-if torch.cuda.is_available():
-    device = "cuda"
-# there's a bug for mps case
-# elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-#     device = "mps" # backend for apple silicon 
-print(f"using device: {device}")
 
 import tiktoken
-# with open('input.txt', 'r') as f:
-#     text = f.read()
-# data = text[:1000] # first 1,000 characters
-# enc = tiktoken.get_encoding("gpt2")
-# tokens = enc.encode(data)
-# B, T = 4, 32 # create a batch to overfit on it first.
-# buf = torch.tensor(tokens[:24 + 1]) # to have target for the very last token in batch
-# buf = buf.to(device)
-# x = buf[:-1].view(4, 6)
-# y = buf[1:].view(4, 6)
 
 class DataLoaderLite:
     # create a simple dataloader to keep reading B*T batches from file to train on.
@@ -261,7 +269,23 @@ class DataLoaderLite:
             self.current_position = 0
         return x, y
 
+#----------------------------------------------------------------------
+# attempt to autodetect device
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+# there's a bug for mps case
+# elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+#     device = "mps" # backend for apple silicon 
+print(f"using device: {device}")
+
+torch.manual_seed(1337)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(1337)
+
 train_loader = DataLoaderLite(B=4, T=32)
+
+# get logits
 model = GPT(GPTConfig())
 model.to(device)
 
