@@ -63,3 +63,10 @@ We use details from gpt3 paper in gpt2 training, paper gives a lot more detials,
 but they never released gpt3 model itself. The architecure very similar, context length 
 increase to 2048 from 1024 and some hyperparameters in transformers.
 Cosine lr has been popularized in gpt2/3
+
+Distributed Data Parallel
+https://pytorch.org/docs/master/generated/torch.nn.parallel.DistributedDataParallel.html
+
+we have 8 gpus, we're going to launch 8 processes and assign to each gpu.
+They're going to be processing different parts of data. Once they all calculate we average those gradients.
+torchrun runs all 8, creates env variables where each processes runs based on them.
