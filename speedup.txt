@@ -23,4 +23,19 @@ As CPU runs, it schedules work on GPU. Sends request and continues running. If w
 It could happen that GPU is still working and CPU measures time it took to run some code inaccurately.
 We need to do torch.cuda.synchronise() and that waits for the GPU to finish all the scheduled runs, and then we can take the time.
 
-If we run train_gpt2.py in baseline FP32 with an A100 GPU, we see 1000 ms per iteration.
+For BFLOAT16 mantissa is even more cropped to 7 bits, and exponent is keps at 8 bits.
+In FP16 has a reduce range because it crops the exponent to 5 bits. That's problematics, since we need to do gradient scaling.
+So BFLOAT16 is preferred, but we do change the tensors as we see them in pytorch.
+
+Only helpful resource in Automatic Mixed Precision in pytorch:
+https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html#adding-torch-autocast
+Contex manager that we want to run forward pass under autocast is:
+`with torch.autocast(device_type=device, dtype=torch.float16):`
+Clicking on torch.autocast there are more useful guidelines.
+Do not call half() or bfloat16() on any tensors or input, just use autocast. 
+Only surround forward pass and loss calculation and leave the backward and optimzier alone!
+
+Some ops are converted to bfloat16 some aren't.
+https://pytorch.org/docs/stable/amp.html#cuda-ops-that-can-autocast-to-float16
+matrix mult are more robust to reduced precision.
+Operations like normalizations, layernorm, softmax, log, loss functions remain in tf32 because they're more susceptible to precision changes.

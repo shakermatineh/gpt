@@ -306,8 +306,11 @@ for i in range(50):
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
     optimizer.zero_grad() # .backward adds to gradient (+=), so we must set to zero at the begining
-    logits, loss = model(x, y) # init loss ~ -ln(1/50257) = 10.8
-    # import code; code.interact(local=locals())
+    with torch.autocast(device_type=device, dtype=torch.bfloat16): # if we use float16 we need to do gradient scaling.
+        logits, loss = model(x, y) # init loss ~ -ln(1/50257) = 10.8
+        # with autocaset context manager logits are in bfloat16 but model.transformer.wte.weight.dtype is still float32
+        # activations are converted but parameters aren't. That's the mixed precision part. It's not clear what is converted.
+        # import code; code.interact(local=locals())
     loss.backward()
     optimizer.step()
     if torch.cuda.is_available(): 
@@ -323,11 +326,17 @@ for i in range(50):
 # pushing their bias to large negative number that makes the softmax probability to almost 0.
 # with this code the loss comes down to 6.84
 
-# baseline with 1 A100 GPU with 40GB memory with FP32 tensors:
-# time per iter: 770ms, tokens_per_sec throughput: 21000
+"""
+baseline with 1 A100 GPU with 40GB memory with FP32 tensors:
+time per iter: 770ms, tokens_per_sec throughput: 21000
 
-# after changing from fp32 to tf32:
-# time per iter: 237ms, tokens_per_sec throughput: 68000
+after changing from fp32 to tf32:
+time per iter: 237ms, tokens_per_sec throughput: 68000
+
+after mixed precision to bfloat16:
+time per iter: 159ms, tokens_per_sec throughput: 102000
+It has less precision. tradeoff. less accurate but can train longer and make up for it.
+"""
 
 import sys; sys.exit(0)
 
