@@ -46,3 +46,13 @@ Without that python interpreter runs in eager mode, starts at forward, goes laye
 Gain come from reducing python overhead and GPU read/writes.
 
 There are operations that torch.compile will not find like flash attention.
+Flash attention does more flops than regular attention implementation, but it's significantly faster.
+It's very mindful of memory hierarchy, what's in high bandwidth memeory and shared memory. 
+It's careful about orchestrating the computation in a way that we have fewer reads and write from and to hight bandwidth memory.
+The expensive part is load and store from and to high bandwidth memory.
+Flash attention is designed in a way that the big attention matrix (att) never gets materialized.
+That's the matrix that queries and keys interact. For each head for each batch element we get a T*T matrix, which is millions numbers.
+It relies on online softmax trick shows how to increamentally evaluate softmax without having to realize all inputs in softmax during normalization.
+[Online normalizer calculation for softmax] from nvidia. Streaming softmax!
+
+Flops don't matter, memory access pattern matters. Torch compile is amazing, but there are many optimization torch.compile can't find.
