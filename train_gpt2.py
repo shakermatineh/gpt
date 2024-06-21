@@ -1,4 +1,5 @@
 import math
+import inspect
 import time
 from dataclasses import dataclass
 import torch
@@ -16,10 +17,8 @@ from torch.nn import functional as F
 
 # model = SimpleModel()
 # model = torch.compile(model)
-
 # x = torch.randn(1, 10)
 # print(model(x))
-
 # import code; code.interact(local=locals())
 
 class CausalSelfAttention(nn.Module):
@@ -229,7 +228,33 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
+    
+    def configure_optimizers(self, weight_decay, learning_rate, device):
+        # decaying weights is a form of regularization, forcing optimizaton to not allow large weights
+        # only decay embeddings and matmult participating weights.
+        # start with all of the candidate parameters (that require grad)
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
+        # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': nodecay_params, 'weight_decay': 0.0}
+        ]
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+        # Create AdamW optimizer and use the fused version if it is available
+        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and 'cuda' in device
+        print(f"using fused AdamW: {use_fused}")
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
+        return optimizer
 
+# ------------------------------------------------------------------------
 import tiktoken
 
 class DataLoaderLite:
@@ -251,6 +276,7 @@ class DataLoaderLite:
         self.current_position = 0
 
     def next_batch(self):
+        # sample without replacement
         B, T = self.B, self.T
         buf = self.tokens[self.current_position : self.current_position+B*T+1]
         x = (buf[:-1]).view(B, T) # inputs
@@ -320,8 +346,7 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff starts at 1 and goes to 0
     return min_lr + coeff * (max_lr - min_lr)
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
-
+optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
 for step in range(max_steps):
     t0 = time.time()
@@ -377,6 +402,9 @@ time per iter: 155ms, tokens_per_sec throughput: 105000
 
 after changing vocab size from 50257 to 50304:
 time per iter: 122ms, tokens_per_sec throughput: 134000
+
+after weight decay and fused AdamW optimizer
+time per iter: 118ms, token_per_sec throughput: 138000
 """
 
 import sys; sys.exit(0)
