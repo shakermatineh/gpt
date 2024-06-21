@@ -54,5 +54,7 @@ Flash attention is designed in a way that the big attention matrix (att) never g
 That's the matrix that queries and keys interact. For each head for each batch element we get a T*T matrix, which is millions numbers.
 It relies on online softmax trick shows how to increamentally evaluate softmax without having to realize all inputs in softmax during normalization.
 [Online normalizer calculation for softmax] from nvidia. Streaming softmax!
-
 Flops don't matter, memory access pattern matters. Torch compile is amazing, but there are many optimization torch.compile can't find.
+
+Everything in cuda works with nice numbers which means powers of two, lots of kernels are written in powers of twos.
+Ugly numbers makes optimizing kernels very hard. For instance 50257 is a very ugly number!

@@ -288,7 +288,12 @@ torch.set_float32_matmul_precision('high')
 # in practice in this code we see 3x because we are memory-bound.
 
 # get logits
-model = GPT(GPTConfig())
+model = GPT(GPTConfig(vocab_size=50304))
+# increase ugly number to nearest number with many powers of 2's. very nice number, divides by 128
+# functionally nothing breaks, it's like adding new tokens that will never be used. Nothing different from tokens never present in a dataset.
+# we're adding calculations but it rans faster! cuda kernels work in powers of two numbers.
+# The kernels chunk to powers to two then solve the nice parts and then come back to remaining parts. It's best to pad.
+
 model.to(device)
 
 # A NumPy version >=1.17.3 and <1.25.0 is required
@@ -339,6 +344,9 @@ time per iter: 201ms, tokens_per_sec throughput: 81000
 
 after flash attention:
 time per iter: 155ms, tokens_per_sec throughput: 105000
+
+after changing vocab size from 50257 to 50304:
+time per iter: 122ms, tokens_per_sec throughput: 134000
 """
 
 import sys; sys.exit(0)
