@@ -302,9 +302,6 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
-# if B, T don't fit into gpu and we get oom, keep decreasing batch size until fits.
-# by default we want to max out batch size, use numbers that have many powers of two's.
-
 # another note on B. In gpt3 paper table 2.1 it says gpt3-small model has 0.5M batch size.
 # that means 0.5 tokens per batch. Each row has 1024 token, so to match that we should have B=488
 # which we can't use since we get OOM in gpu. But we still want to use this batch size because
@@ -312,7 +309,10 @@ if torch.cuda.is_available():
 # to simulate batch size of 0.5M. accumulate for longer but do single update.
 
 total_batch_size = 524288 # 2**19 nice number, ~0.5M, in number of tokens
-B = 16 # micro batch size
+B = 16 # micro batch size.
+# after implementing grad accum, the real batch size in number of tokens is total_batch_size.
+# choosing B is purely system level optimization and should be picked based on available memory on GPU.
+# we want to max that out and chose it in powers of 2.
 T = 1024 # sequence length
 assert total_batch_size % (B * T) == 0, "make sure total_batch_size is divisible by B * T"
 grad_accum_steps = total_batch_size // (B * T)
