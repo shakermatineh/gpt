@@ -302,7 +302,7 @@ model.to(device)
 model = torch.compile(model)
 
 # watch -n 0.1 nvidia-smi
-optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
 for i in range(50):
     t0 = time.time()
     x, y = train_loader.next_batch()
@@ -314,13 +314,17 @@ for i in range(50):
         # activations are converted but parameters aren't. That's the mixed precision part. It's not clear what is converted.
         # import code; code.interact(local=locals())
     loss.backward()
+    # clip gradient to have maximum norm. square every gradient of parameters and add all up and square root.
+    # sometimes we get unlucky during optimization, bad data batch, we get high loss and high gradient, it shocks the model.
+    # it's best to visualize them. if norm of gradient is well behaved it's good, if climbing not stable training, sometimes there are spikes.
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     optimizer.step()
     if torch.cuda.is_available(): 
         torch.cuda.synchronize() # wait for all scheduled gpu jobs to finish.
     t1 = time.time()
-    dt = (t1 - t0) * 1000 # time diff in miliseconds
-    tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
-    print(f"step: {i} loss: {loss.item()}, dt: {dt:.2f}ms, tok/sec: {tokens_per_sec:.2f}")
+    dt = (t1 - t0) # time diff in miliseconds
+    tokens_per_sec = (train_loader.B * train_loader.T) / dt
+    print(f"step {i:4d} | loss: {loss.item():.6f} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
 
 # at every batch we feed new data, so not overfitting on a single batch.
 # each epoch is 2640 batches, we're only doing 50, so not expecting a lot of gain here.

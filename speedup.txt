@@ -58,3 +58,7 @@ Flops don't matter, memory access pattern matters. Torch compile is amazing, but
 
 Everything in cuda works with nice numbers which means powers of two, lots of kernels are written in powers of twos.
 Ugly numbers makes optimizing kernels very hard. For instance 50257 is a very ugly number!
+
+We use details from gpt3 paper in gpt2 training, paper gives a lot more detials,
+but they never released gpt3 model itself. The architecure very similar, context length 
+increase to 2048 from 1024 and some hyperparameters in transformers.
