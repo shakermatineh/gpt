@@ -7,6 +7,24 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+#torch._dynamo.config.suppress_errors = True
+# class SimpleModel(nn.Module):
+#     def __init__(self):
+#         super(SimpleModel, self).__init__()
+#         self.linear = nn.Linear(10, 10)
+
+#     def forward(self, x):
+#         return self.linear(x)
+
+# model = SimpleModel()
+# model = torch.compile(model)
+
+# x = torch.randn(1, 10)
+# print(model(x))
+
+# import code; code.interact(local=locals())
+
+
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
@@ -298,6 +316,9 @@ torch.set_float32_matmul_precision('high')
 # get logits
 model = GPT(GPTConfig())
 model.to(device)
+
+# worked with this version: pip install numpy==1.22.4
+model = torch.compile(model)
 
 # watch -n 0.1 nvidia-smi
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)

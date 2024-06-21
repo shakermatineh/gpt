@@ -39,3 +39,8 @@ Some ops are converted to bfloat16 some aren't.
 https://pytorch.org/docs/stable/amp.html#cuda-ops-that-can-autocast-to-float16
 matrix mult are more robust to reduced precision.
 Operations like normalizations, layernorm, softmax, log, loss functions remain in tf32 because they're more susceptible to precision changes.
+
+torch.compile is a compiler for NNs. It takes out python interpreter.
+torch.compile analyzes the whole code and knows what operations it has to run and optimizes.
+Without that python interpreter runs in eager mode, starts at forward, goes layer by layer, materialized operations as it goes through.
+Also 
