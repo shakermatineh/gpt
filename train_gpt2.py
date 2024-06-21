@@ -1,7 +1,5 @@
-import os
 import math
 import time
-import inspect
 from dataclasses import dataclass
 import torch
 import torch.nn as nn
@@ -24,7 +22,6 @@ from torch.nn import functional as F
 
 # import code; code.interact(local=locals())
 
-
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
@@ -34,11 +31,12 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.c_proj.NANOGPT_SCALE_INIT = 1
-
         # regularization
         self.n_head = config.n_head
         self.n_embd = config.n_embd
+        # not really a 'bias', more of a mask, but following the OpenAI/HF naming though
+        self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
+                                     .view(1, 1, config.block_size, config.block_size))
 
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -50,36 +48,11 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True) # flash attention
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
-        # output projection
-        y = self.c_proj(y)
-        return y
-class CausalSelfAttention(nn.Module):
-
-    def __init__(self, config):
-        super().__init__()
-        assert config.n_embd % config.n_head == 0
-        # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
-        # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.c_proj.NANOGPT_SCALE_INIT = 1
-        # regularization
-        self.n_head = config.n_head
-        self.n_embd = config.n_embd
-
-    def forward(self, x):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        # nh is "number of heads", hs is "head size", and C (number of channels) = nh * hs
-        # e.g. in GPT-2 (124M), n_head=12, hs=64, so nh*hs=C=768 channels in the Transformer
-        qkv = self.c_attn(x)
-        q, k, v = qkv.split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True) # flash attention
+        # attention (materializes the large (T,T) matrix for all the queries and keys)
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        att = F.softmax(att, dim=-1)
+        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)
@@ -105,7 +78,6 @@ class MLP(nn.Module):
         x = self.gelu(x)
         x = self.c_proj(x)
         return x
-
 
 class Block(nn.Module):
 
@@ -143,7 +115,7 @@ class GPT(nn.Module):
         self.config = config
 
         # main module in HF model is transformer (in notebook)
-        # nn. is a module that allows us to index into submodules. 
+        # nn.ModuleDict is a module that allows us to index into submodules. 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd), 
             wpe = nn.Embedding(config.block_size, config.n_embd),
@@ -172,15 +144,15 @@ class GPT(nn.Module):
                 # by a factor of 1/sqrt(N) based on GPT2 paper section 2.3
                 std *= (2 * self.config.n_layer) ** -0.5 # in every block two times residuals added, in mlp and self attention 
             
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
             # std with Xavier init is 1/sqrt(num features in incoming layer)
             # either 768 or 1024 num features 1/sqrt(768) 0r 1/sqrt(1024) ~ 0.03
             # similar to 0.02 range. 
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias) # by default bias init with uniform
             
-            elif isinstance(module, nn.Embedding):
-                torch.nn.init.normal(module.weight, mean=0.0, std=0.02)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(self, idx, targets=None):
         # idx is of shape (B, T)
@@ -253,7 +225,6 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
-    
 
 import tiktoken
 
@@ -278,17 +249,16 @@ class DataLoaderLite:
     def next_batch(self):
         B, T = self.B, self.T
         buf = self.tokens[self.current_position : self.current_position+B*T+1]
-        x = buf[:-1].view(B, T)
-        y = buf[1:].view(B, T)
+        x = (buf[:-1]).view(B, T) # inputs
+        y = (buf[1:]).view(B, T) # targets
+        # advance the position in the tensor
         self.current_position += B * T
+        # if loading the next batch would be out of bounds, reset
         if self.current_position + (B * T + 1) > len(self.tokens):
             self.current_position = 0
         return x, y
 
 #----------------------------------------------------------------------
-import time
-
-
 # attempt to autodetect device
 device = "cpu"
 if torch.cuda.is_available():
@@ -317,7 +287,9 @@ torch.set_float32_matmul_precision('high')
 model = GPT(GPTConfig())
 model.to(device)
 
-# worked with this version: pip install numpy==1.22.4
+# A NumPy version >=1.17.3 and <1.25.0 is required
+# worked with this version: pip install numpy==1.22.4 & 1.24.1
+# latest version less than 
 model = torch.compile(model)
 
 # watch -n 0.1 nvidia-smi
@@ -348,15 +320,18 @@ for i in range(50):
 # with this code the loss comes down to 6.84
 
 """
-baseline with 1 A100 GPU with 40GB memory with FP32 tensors:
-time per iter: 770ms, tokens_per_sec throughput: 21000
+baseline with 1 A100 GPU with 40GB memory with FP32 tensors B=32 T=1024: 
+time per iter: 1040ms, tokens_per_sec throughput: 15750
 
 after changing from fp32 to tf32:
-time per iter: 237ms, tokens_per_sec throughput: 68000
+time per iter: 381ms, tokens_per_sec throughput: 42900
 
 after mixed precision to bfloat16:
-time per iter: 159ms, tokens_per_sec throughput: 102000
+time per iter: 334ms, tokens_per_sec throughput: 49000
 It has less precision. tradeoff. less accurate but can train longer and make up for it.
+
+after torch.compile:
+time per iter: 201ms, tokens_per_sec throughput: 81000
 """
 
 import sys; sys.exit(0)

@@ -43,4 +43,6 @@ Operations like normalizations, layernorm, softmax, log, loss functions remain i
 torch.compile is a compiler for NNs. It takes out python interpreter.
 torch.compile analyzes the whole code and knows what operations it has to run and optimizes.
 Without that python interpreter runs in eager mode, starts at forward, goes layer by layer, materialized operations as it goes through.
-Also 
+Gain come from reducing python overhead and GPU read/writes.
+
+There are operations that torch.compile will not find like flash attention.
