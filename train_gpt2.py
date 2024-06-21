@@ -302,9 +302,24 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
-train_loader = DataLoaderLite(B=16, T=1024) # actual gpt2 context length is 1024 tokens
-# if above doesn't fit into gpu and we get oom, keep decreasing batch size until fits.
+# if B, T don't fit into gpu and we get oom, keep decreasing batch size until fits.
 # by default we want to max out batch size, use numbers that have many powers of two's.
+
+# another note on B. In gpt3 paper table 2.1 it says gpt3-small model has 0.5M batch size.
+# that means 0.5 tokens per batch. Each row has 1024 token, so to match that we should have B=488
+# which we can't use since we get OOM in gpu. But we still want to use this batch size because
+# that's correlated with other optimization hyperparams. For that we need to do gradient accumulation
+# to simulate batch size of 0.5M. accumulate for longer but do single update.
+
+total_batch_size = 524288 # 2**19 nice number, ~0.5M, in number of tokens
+B = 16 # micro batch size
+T = 1024 # sequence length
+assert total_batch_size % (B * T) == 0, "make sure total_batch_size is divisible by B * T"
+grad_accum_steps = total_batch_size // (B * T)
+print(f"total desired batch size: {total_batch_size}")
+print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
+
+train_loader = DataLoaderLite(B=B, T=T)
 
 torch.set_float32_matmul_precision('high')
 # tells pytorch what kernels to run. By default it's highest (float32)
@@ -350,15 +365,25 @@ optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, dev
 
 for step in range(max_steps):
     t0 = time.time()
-    x, y = train_loader.next_batch()
-    x, y = x.to(device), y.to(device)
     optimizer.zero_grad() # .backward adds to gradient (+=), so we must set to zero at the begining
-    with torch.autocast(device_type=device, dtype=torch.bfloat16): # if we use float16 we need to do gradient scaling.
-        logits, loss = model(x, y) # init loss ~ -ln(1/50257) = 10.8
-        # with autocaset context manager logits are in bfloat16 but model.transformer.wte.weight.dtype is still float32
-        # activations are converted but parameters aren't. That's the mixed precision part. It's not clear what is converted.
-        # import code; code.interact(local=locals())
-    loss.backward()
+    loss_accum = 0.0
+    for micro_step in range(grad_accum_steps):
+        x, y = train_loader.next_batch()
+        x, y = x.to(device), y.to(device)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            logits, loss = model(x, y) # init loss ~ -ln(1/50257) = 10.8
+            # with autocaset context manager logits are in bfloat16 but model.transformer.wte.weight.dtype is still float32
+            # activations are converted but parameters aren't. That's the mixed precision part. It's not clear what is converted.
+            # import code; code.interact(local=locals())
+
+        # we have to scale the loss to account for gradient accumulation,
+        # because the gradients just add on each successive backward().
+        # addition of gradients corresponds to a SUM in the objective, but
+        # instead of a SUM we want MEAN. Scale the loss here so it comes out right
+        loss = loss / grad_accum_steps
+        loss_accum += loss.detach()
+        loss.backward()
+    
     # clip gradient to have maximum norm. square every gradient of parameters and add all up and square root.
     # sometimes we get unlucky during optimization, bad data batch, we get high loss and high gradient, it shocks the model.
     # it's best to visualize them. if norm of gradient is well behaved it's good, if climbing not stable training, sometimes there are spikes.
@@ -371,9 +396,10 @@ for step in range(max_steps):
     if torch.cuda.is_available(): 
         torch.cuda.synchronize() # wait for all scheduled gpu jobs to finish.
     t1 = time.time()
-    dt = (t1 - t0) # time diff in miliseconds
-    tokens_per_sec = (train_loader.B * train_loader.T) / dt
-    print(f"step {step:4d} | loss: {loss.item():.6f} | lr {lr:.4e} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
+    dt = (t1 - t0) # time diff in seconds
+    tokens_processed = train_loader.B * train_loader.T * grad_accum_steps
+    tokens_per_sec = tokens_processed / dt
+    print(f"step {step:4d} | loss: {loss_accum.item():.6f} | lr {lr:.4e} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
 
 # at every batch we feed new data, so not overfitting on a single batch.
 # each epoch is 2640 batches, we're only doing 50, so not expecting a lot of gain here.
@@ -405,10 +431,13 @@ time per iter: 122ms, tokens_per_sec throughput: 134000
 
 after weight decay and fused AdamW optimizer
 time per iter: 118ms, token_per_sec throughput: 138000
+
+after gradient accum each iteration takes longer since more tokens per batch/iter.
+time per iter: 3680ms, token_per_sec throughput: 142000
+
 """
 
 import sys; sys.exit(0)
-
 
 # generate tokens from the model
 # identical to generator("Hello, I'm a language model,", max_length=30, num_return_sequences=5) in notebook
