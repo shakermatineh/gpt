@@ -62,3 +62,4 @@ Ugly numbers makes optimizing kernels very hard. For instance 50257 is a very ug
 We use details from gpt3 paper in gpt2 training, paper gives a lot more detials,
 but they never released gpt3 model itself. The architecure very similar, context length 
 increase to 2048 from 1024 and some hyperparameters in transformers.
+Cosine lr has been popularized in gpt2/3
