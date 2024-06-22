@@ -70,3 +70,13 @@ https://pytorch.org/docs/master/generated/torch.nn.parallel.DistributedDataParal
 we have 8 gpus, we're going to launch 8 processes and assign to each gpu.
 They're going to be processing different parts of data. Once they all calculate we average those gradients.
 torchrun runs all 8, creates env variables where each processes runs based on them.
+
+Datasets reprentative of what gpt2/3 were trained on.
+clean and depuped subset of RedPajama dataset:
+https://www.cerebras.net/blog/slimpajama-a-627b-token-cleaned-and-deduplicated-version-of-redpajama
+Another one is Fineweb, a high quality common crawl. https://huggingface.co/spaces/HuggingFaceFW/blogpost-fineweb-v1
+HF released a subset of it is fineweb-edu, high quality eduational subset. 
+We tain on sample-10BT subset. That's enough to get close enough to gpt2 performance.
+
+tokens in terms of lengths:
+1 token ~= 4 chars in English. 1 token ~= ¾ words. 100 tokens ~= 75 words.

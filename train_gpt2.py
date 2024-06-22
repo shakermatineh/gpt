@@ -259,26 +259,38 @@ class GPT(nn.Module):
 
 # ------------------------------------------------------------------------
 import tiktoken
+import numpy as np
+
+def load_tokens(filename):
+    npt = np.load(filename)
+    ptt = torch.tensor(npt, dtype=torch.long)
+    return ptt
 
 class DataLoaderLite:
-    # distributed data loader
-    def __init__(self, B, T, process_rank, num_processes):
+    def __init__(self, B, T, process_rank, num_processes, split):
         self.B = B
         self.T = T
         self.process_rank = process_rank
         self.num_processes = num_processes
+        assert split in {'train', 'val'}
 
-        # at init load tokens from disk and store them in memory
-        with open('input.txt', 'r') as f:
-            text = f.read()
-        enc = tiktoken.get_encoding('gpt2')
-        tokens = enc.encode(text)
-        self.tokens = torch.tensor(tokens)
+        # get the shard filenames
+        data_root = "edu_fineweb10B"
+        shards = os.listdir(data_root)
+        shards = [s for s in shards if split in s]
+        shards = sorted(shards)
+        shards = [os.path.join(data_root, s) for s in shards]
+        self.shards = shards
+        assert len(shards) > 0, f"no shards found for split {split}"
         if master_process:
-            print(f"loaded {len(self.tokens)} tokens")
+            print(f"found {len(shards)} shards for split {split}")
+        self.reset()
 
-        # state
-        self.current_position = self.B * self.T * self.process_rank # process 0 start at 0, process 1 starts at B*T, etc
+    def reset(self):
+        # state, init at shard zero
+        self.current_shard = 0
+        self.tokens = load_tokens(self.shards[self.current_shard])
+        self.current_position = self.B * self.T * self.process_rank
 
     def next_batch(self):
         B, T = self.B, self.T
@@ -286,10 +298,12 @@ class DataLoaderLite:
         x = (buf[:-1]).view(B, T) # inputs
         y = (buf[1:]).view(B, T) # targets
         # advance the position in the tensor
-        self.current_position += B * T * self.num_processes # advance on the entire page (chunks loaded on all gpus)
-        # if loading the next batch would be out of bounds, reset
+        self.current_position += B * T * self.num_processes
+        # if loading the next batch would be out of bounds, advance to next shard
         if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens):
-            self.current_position = self.B * self.T * self.process_rank
+            self.current_shard = (self.current_shard + 1) % len(self.shards)
+            self.tokens = load_tokens(self.shards[self.current_shard])
+            self.current_position = B * T * self.process_rank
         return x, y
 
 #----------------------------------------------------------------------
@@ -341,10 +355,13 @@ if torch.cuda.is_available():
 # to simulate batch size of 0.5M. accumulate for longer but do single update.
 
 total_batch_size = 524288 # 2**19 nice number, ~0.5M, in number of tokens
-B = 16 # micro batch size.
+
+B = 16 # micro batch size. # increased to 64 for 80GB gpus.
+
 # after implementing grad accum, the real batch size in number of tokens is total_batch_size.
 # choosing B is purely system level optimization and should be picked based on available memory on GPU.
 # we want to max that out and chose it in powers of 2.
+
 T = 1024 # sequence length
 assert total_batch_size % (B * T * ddp_world_size) == 0, "make sure total_batch_size is divisible by B * T * ddp_world_size"
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size) # 4
@@ -356,7 +373,8 @@ if master_process:
 # print("Bye")
 # import sys; sys.exit(0)
 
-train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size)
+train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split="train")
+val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split="val")
 
 torch.set_float32_matmul_precision('high')
 # tells pytorch what kernels to run. By default it's highest (float32)
@@ -390,8 +408,10 @@ raw_model = model.module if ddp else model # always contains the "raw" unwrapped
 # starts at zero, linearly ramps up over some amount of time and comes down with a cosine form.
 max_lr = 6e-4 # page 8 of gpt3 paper
 min_lr = max_lr * 0.1 # per description in paper
-warmup_steps = 10
-max_steps = 50
+
+warmup_steps = 715 # gpt3 lr warmup over first 375 million tokens, each step 2^19 tokens, means 375e6 / 2^19 = 715 warmup steps.
+max_steps = 19073 # 10e9 / 2e19 = 19073. 2^19 tokens per iter, num tokens on all shard 10 billion tokens.
+
 def get_lr(it):
     # 1) linear warmup for warmup_iters steps
     if it < warmup_steps:
@@ -409,6 +429,30 @@ optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4,
 
 for step in range(max_steps):
     t0 = time.time()
+    
+    # once in a while evaluate our validation loss
+    # it's important to have validation loss specially if more than 1 epoch like 10, 
+    # need to track that we're not memorizing data.
+    if step % 100 == 0:
+        model.eval() # put model in validation mode.
+        val_loader.reset()
+        with torch.no_grad():
+            val_loss_accum = 0.0
+            val_loss_steps = 20
+            for _ in range(val_loss_steps):
+                x, y = val_loader.next_batch()
+                x, y = x.to(device), y.to(device)
+                with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                    logits, loss = model(x, y) # we have infinite data, expect similar val and train loss.
+                loss = loss / val_loss_steps
+                val_loss_accum += loss.detach()
+        if ddp:
+            dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
+        if master_process:
+            print(f"validation loss: {val_loss_accum.item():.4f}")
+
+    # training loop
+    model.train()
     optimizer.zero_grad() # .backward adds to gradient (+=), so we must set to zero at the begining
     loss_accum = 0.0
     for micro_step in range(grad_accum_steps):
@@ -448,7 +492,7 @@ for step in range(max_steps):
     tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
     tokens_per_sec = tokens_processed / dt
     if master_process:
-        print(f"step {step:4d} | loss: {loss_accum.item():.6f} | lr {lr:.4e} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
+        print(f"step {step:5d} | loss: {loss_accum.item():.6f} | lr {lr:.4e} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
 
 if ddp:
     destroy_process_group()
