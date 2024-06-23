@@ -268,6 +268,14 @@ def load_tokens(filename):
     ptt = torch.tensor(npt, dtype=torch.long)
     return ptt
 
+# we're not very careful about DataLoder when doing multi epoch runs
+# This goes through data in exactly same format. Ideally we want to permute
+# the documents randomly in every shard and in every new epochs. This helps 
+# in decreasing periodicity in loss and it helps optimzier.
+# currenlty documents are glued in exactly same manner always. we should break
+# up that dependency.
+
+
 class DataLoaderLite:
     def __init__(self, B, T, process_rank, num_processes, split):
         self.B = B
@@ -435,7 +443,7 @@ raw_model = model.module if ddp else model # always contains the "raw" unwrapped
 
 # learning rate scheuler in gpt3 is called cosine decay lr schedule with warmup.
 # starts at zero, linearly ramps up over some amount of time and comes down with a cosine form.
-max_lr = 6e-4 # page 8 of gpt3 paper
+max_lr = 6e-4 # page 8 of gpt3 paper. we can likely get away with 3x higher max lr.
 min_lr = max_lr * 0.1 # per description in paper
 
 warmup_steps = 715 # gpt3 lr warmup over first 375 million tokens, each step 2^19 tokens, means 375e6 / 2^19 = 715 warmup steps.
