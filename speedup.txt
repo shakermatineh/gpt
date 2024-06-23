@@ -91,3 +91,8 @@ Larger models can accept all 4 answers, this has the advantage that model see al
 
 This is another evaluatin dataset for LMs:
 https://github.com/EleutherAI/lm-evaluation-harness
+
+If we want to talk to the model, we need to FT for chat.
+A conversational dataset with assistant user sections.
+We fill in the user tokens and sample the assistant tokens.
+We swap the dataset and continue training.

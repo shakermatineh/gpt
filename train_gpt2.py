@@ -36,9 +36,6 @@ class CausalSelfAttention(nn.Module):
         # regularization
         self.n_head = config.n_head
         self.n_embd = config.n_embd
-        # not really a 'bias', more of a mask, but following the OpenAI/HF naming though
-        self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
-                                     .view(1, 1, config.block_size, config.block_size))
 
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -265,6 +262,7 @@ import numpy as np
 
 def load_tokens(filename):
     npt = np.load(filename)
+    npt = npt.astype(np.int32)
     ptt = torch.tensor(npt, dtype=torch.long)
     return ptt
 
@@ -594,6 +592,9 @@ for step in range(max_steps):
     for micro_step in range(grad_accum_steps):
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
+        # added after video, this field is also used by the forward pass.
+        if ddp:
+            model.require_backward_grad_sync = (micro_step == grad_accum_steps - 1)
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
             logits, loss = model(x, y) # init loss ~ -ln(1/50257) = 10.8
             # with autocaset context manager logits are in bfloat16 but model.transformer.wte.weight.dtype is still float32
@@ -606,8 +607,6 @@ for step in range(max_steps):
         # instead of a SUM we want MEAN. Scale the loss here so it comes out right
         loss = loss / grad_accum_steps
         loss_accum += loss.detach()
-        if ddp:
-            model.require_backward_grad_sync = (micro_step == grad_accum_steps - 1) # only sync if final microstep iteration
         loss.backward()
         if ddp:
             dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG) # dist is pytorch distributed
