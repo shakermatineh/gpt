@@ -89,3 +89,5 @@ For small models, the way we feed the Hellaswag dataset is to create a batch of 
 First the context is added to all rows, then each answer is appended, probabilites of generated tokens for each are averaged and largest is picked.
 Larger models can accept all 4 answers, this has the advantage that model see all 4 before giving an answer.
 
+This is another evaluatin dataset for LMs:
+https://github.com/EleutherAI/lm-evaluation-harness

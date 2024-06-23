@@ -424,6 +424,8 @@ model = GPT(GPTConfig(vocab_size=50304))
 # we're adding calculations but it rans faster! cuda kernels work in powers of two numbers.
 # The kernels chunk to powers to two then solve the nice parts and then come back to remaining parts. It's best to pad.
 
+# model = GPT.from_pretrained("gpt2") # or init from OpenAI GPT-2
+
 model.to(device)
 
 # A NumPy version >=1.17.3 and <1.25.0 is required
@@ -448,6 +450,7 @@ min_lr = max_lr * 0.1 # per description in paper
 
 warmup_steps = 715 # gpt3 lr warmup over first 375 million tokens, each step 2^19 tokens, means 375e6 / 2^19 = 715 warmup steps.
 max_steps = 19073 # 10e9 / 2e19 = 19073. 2^19 tokens per iter, num tokens on all shard 10 billion tokens.
+# 19,073 steps is ~1 epoch, if data is 10B tokens and batch size 0.5M tokens
 
 def get_lr(it):
     # 1) linear warmup for warmup_iters steps
@@ -497,6 +500,20 @@ for step in range(max_steps):
             print(f"validation loss: {val_loss_accum.item():.4f}")
         with open(log_file, "a") as f:
             f.write(f"{step} val {val_loss_accum.item():.4f}\n")
+            if step > 0 and (step % 5000 == 0 or last_step):
+                # optionally write model checkpoints
+                checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
+                checkpoint = { # state dict
+                    'model': raw_model.state_dict(),
+                    'config': raw_model.config,
+                    'step': step,
+                    'val_loss': val_loss_accum.item()
+                }
+                # you might also want to add optimizer.state_dict() and
+                # rng seeds etc., if you wanted to more exactly resume training
+                # optimzier has few additional buffers because of Adam, m and v
+                # also rng seeds.
+                torch.save(checkpoint, checkpoint_path)
 
     # once in a while evaluate hellaswag
     if (step % 250 == 0 or last_step) and (not use_compile):
