@@ -96,3 +96,25 @@ If we want to talk to the model, we need to FT for chat.
 A conversational dataset with assistant user sections.
 We fill in the user tokens and sample the assistant tokens.
 We swap the dataset and continue training.
+
+Tokenizer
+https://tiktokenizer.vercel.app
+
+cl100k_base: gpt4 tokenizer, half as many tokens in a sequence compared to gpt2.
+disadvantage is tha embedding table and softmax table grows too. there is a soft spot.
+
+strings are immutable sequences of unicode codepoints.
+wikipedia unicode, 149813 characters right now, latest update 2023.
+The way to access unicode codepoint for a character is by using ord() in python.
+
+Why can't we just use these integers and not having tokenizer? vocab would be too long. 150k.
+More importantly unice standard is very much alive and still changing. not stable.
+So we need something better, look into encodings.
+
+Unicode wiki: "The Unicode Standard itself defines three encodings: UTF-8, UTF-16, and UTF-32,"
+These are the ways we can take unicode text and transform it to binary data or byte strings.
+utf-8 is by far the most common. It takes every code point and transfers it to byte string of 1 to 4 points.
+utf-32 is fixed-length. They have pros and cons. blog: utf-8 everywhere manifesto.
+
+BPE: iterativley find pairs of tokens that occur most frequently, we replace that with a single new token
+we replacce every occourance with new token. Example in BPE wiki.
