@@ -9,20 +9,6 @@ from torch.nn import functional as F
 
 from hellaswag import render_example, iterate_examples
 
-#torch._dynamo.config.suppress_errors = True
-# class SimpleModel(nn.Module):
-#     def __init__(self):
-#         super(SimpleModel, self).__init__()
-#         self.linear = nn.Linear(10, 10)
-
-#     def forward(self, x):
-#         return self.linear(x)
-
-# model = SimpleModel()
-# model = torch.compile(model)
-# x = torch.randn(1, 10)
-# print(model(x))
-# import code; code.interact(local=locals())
 
 class CausalSelfAttention(nn.Module):
 

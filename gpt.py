@@ -200,10 +200,13 @@ class GPTLanguageModel(nn.Module):
         if targets is None:
             loss = None
         else:
+            # pytroch wants channels to the second dimension in logits for F.cross_entropy to work
+            # https://pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html
+            # reshaping logits.
             B, T, C = logits.shape
             logits = logits.view(B*T, C)
             targets = targets.view(B*T)
-            loss = F.cross_entropy(logits, targets)
+            loss = F.cross_entropy(logits, targets) 
 
         return logits, loss
 
@@ -250,6 +253,6 @@ for iter in range(max_iters):
     optimizer.step()
 
 # generate from the model
-context = torch.zeros((1, 1), dtype=torch.long, device=device)
+context = torch.zeros((1, 1), dtype=torch.long, device=device) # starting from token id of 0, new line character
 print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
 #open('more.txt', 'w').write(decode(m.generate(context, max_new_tokens=10000)[0].tolist()))
