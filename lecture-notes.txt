@@ -103,18 +103,57 @@ https://tiktokenizer.vercel.app
 cl100k_base: gpt4 tokenizer, half as many tokens in a sequence compared to gpt2.
 disadvantage is tha embedding table and softmax table grows too. there is a soft spot.
 
-strings are immutable sequences of unicode codepoints.
-wikipedia unicode, 149813 characters right now, latest update 2023.
-The way to access unicode codepoint for a character is by using ord() in python.
+Python docs: "Strings are immutable sequences of unicode codepoints."
 
+What is Unicode?
+Unicode is a universal character encoding standard that assigns a unique number (code point) 
+to every character from every writing system, as well as symbols, punctuation marks, and emojis. 
+This standard ensures that text looks the same on different systems and platforms.
+
+What is code point?
+An integer that corresponds to a specific character in a character encoding standard, such as Unicode.
+
+wikipedia unicode: 149813 characters right now, latest update 2023
+The way to access unicode code point for a character is by using ord() in python.
+ord("h") = 104. For single character "h" unicode code point is 104.
+ord("👋") unicode code point is 128075. 
+
+The raw code points are already assigned integers.
 Why can't we just use these integers and not having tokenizer? vocab would be too long. 150k.
-More importantly unice standard is very much alive and still changing. not stable.
-So we need something better, look into encodings.
+More importantly unice standard is very much alive and still changing. not stable representation.
+So we need something better, so we turn into encodings.
 
-Unicode wiki: "The Unicode Standard itself defines three encodings: UTF-8, UTF-16, and UTF-32,"
-These are the ways we can take unicode text and transform it to binary data or byte strings.
-utf-8 is by far the most common. It takes every code point and transfers it to byte string of 1 to 4 points.
-utf-32 is fixed-length. They have pros and cons. blog: utf-8 everywhere manifesto.
+What is Encoding?
+An encoding is a way to convert these Unicode code points into a sequence of bytes 
+that can be stored in memory, transmitted over networks, or processed by computers.
+Encodings define how the abstract Unicode code points are represented as a series of bits.
+
+From Unicode wiki: "The Unicode Standard defines three encodings: UTF-8, UTF-16, and UTF-32,"
+These are the ways we can take unicode text and translate it to binary data or byte streams.
+utf-8 is by far the most common. It takes every code point and transfers it to byte streams.
+This byte stream of UTF-8 is between 1 to 4 bytes, so it's variable length encoding.
+UTF-32 on the other hand is fixed-length. Each encoding has its own pros and cons. UTF-8
+is preferred, one reason is that it is backward compatible with ASCII.
+blog: utf-8 everywhere manifesto.
+
+The first 128 characters (0-127) are identical to ASCII, making it compatible with ASCII text.
+There are 128 Ascii characters, represnted by one byte. More complex characters are represented by more bytes.
+To get bytes from strings we do "👋".encode("utf-8"). This gives a sequence of 4 bytes: b'\xf0\x9f\x91\x8b'.
+Each \xNN is a hexadecimal representation. Two numbers each range from 1 to 9, A, B, C, D, E, F. So there
+are 16 * 16 = 256 of these representations. Each is a byte Id. list("👋".encode("utf-8")) = [240, 159, 145, 139] shows
+sequence of 4 bytes representing the hand-wave emoji.
+
+We can in theory use 256 raw byte IDs of utf-8 encoding for tokenizer but that implies vocab_size of 256, 
+too small, makes sequences too long and attention becomes expensive. we want to stick to utf-8 but have 
+larger vocab size. That is BPE. First raw byte sequences are produces by then they are merged and compressed.
+There's research on feeding raw byte sequence streams to transformers.
+That is tokenization-free autoregressive sequence modeling at scale. 
 
 BPE: iterativley find pairs of tokens that occur most frequently, we replace that with a single new token
-we replacce every occourance with new token. Example in BPE wiki.
+we replacce every occourance with new token. Example in BPE wiki. tokenizer has its own training set, 
+can be different from llm training dataset. Tokenizer is trained using BPE.
+
+Merging hueristics on top of BPE.
+Below is just the inference code for tokenizer, not training.
+https://github.com/openai/gpt-2/blob/master/src/encoder.py#L53
+We don't know the exat code for training tokenizer, but it's not as simple as chunk it up then BPE it. 
