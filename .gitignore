@@ -7,3 +7,11 @@
 # Ignore data directory
 edu_fineweb10B/
 
+
+# Ignore model files
+*.model
+
+# Ignore vocabulary files
+*.vocab
+
+__pycache__/
