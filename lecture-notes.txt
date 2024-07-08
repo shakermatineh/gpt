@@ -157,3 +157,57 @@ Merging hueristics on top of BPE.
 Below is just the inference code for tokenizer, not training.
 https://github.com/openai/gpt-2/blob/master/src/encoder.py#L53
 We don't know the exat code for training tokenizer, but it's not as simple as chunk it up then BPE it. 
+
+Special tokens.
+gpt2 has one special token <|endoftext|>. Model should learn things coming after this are not related anymore.
+special tokens are important specially in finetuned and chat models
+registering special token in gpt2: https://github.com/openai/tiktoken/blob/main/tiktoken_ext/openai_public.py#L25
+gpt4 has 5 special tokens: https://github.com/openai/tiktoken/blob/main/tiktoken_ext/openai_public.py#L87
+It has FIM tokens, fill in the middle: https://arxiv.org/pdf/2207.14255
+we can extend tiktokens adding new special tokens. instructions in tiktoken github.
+When adding special tokens, we have to do model surgery in transformer. 
+Need to makes sure embedding matrix extended, initialized random.
+Also final layer and projection layer has to be extended.
+Common operation specially in finetuning, extending from base model to chat model.
+Tiktoken code can only do inference, we need to write our own code for training tokenizer.
+
+sentencepiece vs tiktoken
+Unlike tiktoken, we can do both training and inference.
+It is used by both llama and mistral series. Compared to tikton the order of operations if different
+Tiktoken First takes code point, encode then using utf-8 to bytes and merge bytes.
+In sentencepiece BPE is done on code points, and falls back to bytes for rare code points. 
+Rare codepoints are specified with hyperparameter character_coverage, they are either mapped to UNK token, 
+or if byte_fallback is on, the rare code points are encoded using utf-8, and bytes will be transformed 
+to tokens and special byte tokens are added to vocabulary.
+
+How to define vocab_size?
+
+How to take pretrained and extend vocab size for special functionality?
+finetunign for chatgpt, new special tokens on top of base model to maintain the metadata and structure
+of conversation between user and system. Also we may need special tokens for using browser or any other tool.
+Resize embeddings, initialize new random small numbers. Freeze base model, introduce new parameters and only
+train new parameters to introduce new tokens into the architecure. Freeze/train arbitrary parts of it.
+
+introducing new vocabulary goes beyond just adding special tokens. There's an entire design space.
+Paper: learning to compress prompts with gist tokens. https://arxiv.org/pdf/2304.08467
+If prompt is very long things slow down. instead we can introduce new tokens put them in sequence, trian model
+by distillation, rest frozen, we train such that behavior is identical to model with very long prompt.
+At test time we can use new tokens and no need to have long prompt. It's a technique in PEFT class.
+
+gpt3.5-turbo-instruct is a completion model, not a chat model. A lot closer to base model.
+
+SolidGoldMagikarp token:
+https://www.lesswrong.com/posts/aPeJE8bSo6rAFoLqg/solidgoldmagikarp-plus-prompt-generation
+The token appears only in tokenzation training data, but not actual language modeling.
+It never occurs and it has a completely untrained vector and invokes undefined behavior 
+because it is out of distribution.
+
+Yaml preferred over json because same text represented with fewer tokens. in the token economy
+where we pay per context length we need to think about token efficiencies.
+
+If we can use gpt4 vocab in tiktoken that's best, for inference (byte level BPE).
+If for some reason we need to train our own tokenizer try BPE with sentencepiece.
+But algorithm in inferior to tiktoken.
+Another option if need to train tokenizer is to wait for minBPE to become complete.
+What we need is tiktoken but with training code. minBPE is an implementation of it in python. 
+
