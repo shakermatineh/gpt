@@ -41,7 +41,12 @@ class CausalSelfAttention(nn.Module):
         # att = F.softmax(att, dim=-1)
         # y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         
-        # Flash attention
+        # Flash attention: kernel fusion operation, combining multipel steps into a singel GPU kernel
+        # to reduce overhead of mutiple read/writes to high bandwidth memory. Using shared memory
+        # is faster than HBM to store intermediate results. shared memory is much closer to processing 
+        # cores. shared memory within GPU acts like user managed cache. Large att matrix doesn't get read or written to HBM 
+        # algorithm uses online softmax trick.
+        
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
         
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
@@ -239,7 +244,7 @@ class GPT(nn.Module):
         use_fused = fused_available and 'cuda' in device
         if master_process:
             print(f"using fused AdamW: {use_fused}")
-        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused) # fused also does kernl fusion for lower overhead
         return optimizer
 
 # ------------------------------------------------------------------------
@@ -368,18 +373,22 @@ if torch.cuda.is_available():
 enc = tiktoken.get_encoding("gpt2")
 
 # In gpt3 paper table 2.1 it says gpt3-small model has 0.5M batch size.
-# that means 0.5 tokens per batch. Each row has 1024 token, so to match that we should have B=488
+# that means 0.5M tokens per batch. Each row has 1024 tokens, so to match that we should have B=488
 # which we can't use since we get OOM in gpu. But we still want to use this batch size because
-# that's correlated with other optimization hyperparams. For that we need to do gradient accumulation
-# to simulate batch size of 0.5M. accumulate for longer but do single update.
+# that's correlated with other optimization hyperparams (lr, weight decay, beta1, beta2). 
+# to have faithful represenation of hyperparam we need to do gradient accumulation to simulate batch size of 0.5M. 
+# We accumulate for longer but do single update.
 total_batch_size = 524288 # 2**19 nice number, ~0.5M, in number of tokens
 
 B = 16 # micro batch size. # increased to 64 for 80GB gpus.
+T = 1024 # sequence length
+
+# When using grad accum, we still have (B, T) batches in forward/backward but we don't updated weights.
+# we do grad_accum_steps number of forward/backwards and accumulate gradients, then we updated weights.
 # after implementing grad accum, the real batch size in number of tokens is total_batch_size.
+
 # choosing B is purely system level optimization and should be picked based on available memory on GPU.
 # we want to max that out and chose it in powers of 2.
-
-T = 1024 # sequence length
 
 assert total_batch_size % (B * T * ddp_world_size) == 0, "make sure total_batch_size is divisible by B * T * ddp_world_size"
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size) # 4
@@ -575,7 +584,7 @@ for step in range(max_steps):
     model.train()
     optimizer.zero_grad() # .backward adds to gradient (+=), so we must set to zero at the begining
     loss_accum = 0.0
-    for micro_step in range(grad_accum_steps):
+    for micro_step in range(grad_accum_steps): # just accum grads but don't update weights.
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
         # added after video, this field is also used by the forward pass.

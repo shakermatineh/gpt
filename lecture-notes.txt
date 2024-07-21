@@ -59,10 +59,21 @@ Flops don't matter, memory access pattern matters. Torch compile is amazing, but
 Everything in cuda works with nice numbers which means powers of two, lots of kernels are written in powers of twos.
 Ugly numbers makes optimizing kernels very hard. For instance 50257 is a very ugly number!
 
+Hyperparameter:
 We use details from gpt3 paper in gpt2 training, paper gives a lot more detials,
 but they never released gpt3 model itself. The architecure very similar, context length 
 increase to 2048 from 1024 and some hyperparameters in transformers.
-Cosine lr has been popularized in gpt2/3
+Cosine lr has been popularized in gpt2/3.
+
+Gradual batch size increase:
+gradients initially are correlated. The all learn simple stuff about biases
+that what tokens aprea and what not. So we can get same gradient from 32 samples that we get from 1024. 
+So there's no need to have high batch size initially. As we progress in training it gets harder and gradients
+become decorrelated, so we need higher sample size to statistical power.
+
+Weight decay of 0.1 for small regularizaton effect. 10 times higher than default optimizer.
+It is common to not weight decay one-dim tensors like layernorm, scales and biases.
+We weight decay embeddings and matmul weights. We do not allow any one of the weights to be too large.
 
 Distributed Data Parallel
 https://pytorch.org/docs/master/generated/torch.nn.parallel.DistributedDataParallel.html
