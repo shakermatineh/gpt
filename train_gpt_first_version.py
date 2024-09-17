@@ -150,7 +150,7 @@ class Block(nn.Module):
     Residual pathways/skip connections:
     addition distributes gradient equally to both branches. 
     The supervision (gradient of the loss) hop from addition node to input. 
-    Gradient super highway goes from direcctly to the input.
+    Gradient super highway goes directly to the input.
     The residual blocks initialized in a way to contribute very little to the pathway.
     The blocks come online over time but initially gradient is directly goes from loss to input.
     That dramatically improves optimization of deep networks.
