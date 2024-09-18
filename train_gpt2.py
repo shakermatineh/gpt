@@ -362,8 +362,8 @@ else:
     device = "cpu"
     if torch.cuda.is_available():
         device = "cuda"
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        device = "mps"
+    # elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    #     device = "mps"
     print(f"using device: {device}")
 
 torch.manual_seed(1337)
@@ -382,6 +382,8 @@ total_batch_size = 524288 # 2**19 nice number, ~0.5M, in number of tokens
 
 B = 16 # micro batch size. # increased to 64 for 80GB gpus.
 T = 1024 # sequence length
+# to run on one A100 GPU use B=16, T=1024
+# to run on cpu use B=64, T=256
 
 # When using grad accum, we still have (B, T) batches in forward/backward but we don't updated weights.
 # we do grad_accum_steps number of forward/backwards and accumulate gradients, then we updated weights.
